@@ -1,0 +1,59 @@
+{
+  "name": "affect-cli",
+  "version": "0.0.1",
+  "description": "Affect command-line interface",
+  "homepage": "https://github.com/ludicroushq/affect-cli#readme",
+  "bugs": {
+    "url": "https://github.com/ludicroushq/affect-cli/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ludicroushq/affect-cli.git"
+  },
+  "bin": {
+    "affect": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "scripts"
+  ],
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "check": "bun run lint && bun run typecheck && bun run test",
+    "build": "bun build src/index.ts --target=bun --outfile=dist/index.js --external @dotenvx/dotenvx --external @dotenvx/dotenvx/package.json",
+    "lint": "ultracite check --disable-nested-config --no-ignore",
+    "typecheck": "tsc --noEmit",
+    "test": "bun run build && vitest run",
+    "changeset": "changeset",
+    "release": "changeset publish",
+    "prepublishOnly": "bun run check",
+    "prepack": "bun run build",
+    "prepare": "effect-tsgo patch --no-typescript --oxlint && husky"
+  },
+  "dependencies": {
+    "@dotenvx/dotenvx": "2.38.0"
+  },
+  "devDependencies": {
+    "@changesets/cli": "3.0.3",
+    "@effect/platform-bun": "4.1.1",
+    "@effect/tsgo": "0.54.0",
+    "@types/bun": "1.4.4",
+    "@types/node": "^24",
+    "effect": "4.1.1",
+    "husky": "9.1.7",
+    "oxfmt": "0.73.0",
+    "oxlint": "1.88.0",
+    "oxlint-tsgolint": "7.0.2004",
+    "typescript": "7.0.2",
+    "ultracite": "8.0.1",
+    "vitest": "5.0.5"
+  },
+  "engines": {
+    "bun": ">=1.4.2"
+  },
+  "packageManager": "bun@1.4.2"
+}

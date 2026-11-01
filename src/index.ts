@@ -1,0 +1,39 @@
+#!/usr/bin/env bun
+import { BunRuntime, BunServices } from "@effect/platform-bun";
+import { Console, Effect, Logger } from "effect";
+import { Argument, Command, Flag } from "effect/cli";
+
+import { version } from "../package.json";
+import { deploy } from "./deploy";
+import { dotenvx } from "./dotenv";
+import { exports } from "./environment";
+import { setup } from "./setup";
+
+const program = Command.make("affect").pipe(
+  Command.withDescription("Environment and deployment commands for Affect applications."),
+  Command.withSubcommands([
+    Command.make("env", {}, () => exports().pipe(Effect.flatMap(Console.log))).pipe(
+      Command.withDescription("Print shell exports for the selected encrypted environment."),
+    ),
+    Command.make(
+      "dotenvx",
+      { args: Argument.String("args").pipe(Argument.variadic()) },
+      ({ args }) => dotenvx(args, false),
+    ).pipe(Command.withDescription("Run the bundled dotenvx CLI; pass its flags after --.")),
+    Command.make("setup", {}, setup).pipe(
+      Command.withDescription("Initialize or retry an anonymous local Convex backend."),
+    ),
+    Command.make(
+      "deploy",
+      { build: Flag.Boolean("build").pipe(Flag.withDefault(false)) },
+      ({ build }) => deploy(build),
+    ).pipe(
+      Command.withDescription("Deploy the selected Vercel preview or production environment."),
+    ),
+  ]),
+  Command.run({ version }),
+  Effect.provide(BunServices.layer),
+  Effect.provideService(Logger.LogToStderr, true),
+);
+
+BunRuntime.runMain(program);
