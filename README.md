@@ -39,4 +39,4 @@ bun run changeset version
 bun run release
 ```
 
-Version `0.0.1` is prepared for the first publication; do not bump it before publishing. Future changes use Changesets. `release` publishes to npm and creates a Git tag, so run it only when ready to publish.
+For automated releases, commit a changeset with each releasable change. The release workflow opens a version PR; merging it publishes to npm. Configure npm's GitHub trusted publisher for `ludicroushq/affect-cli`, workflow `release.yml`, with direct publishing enabled. No npm token is needed. `bun run release` remains available for an intentional manual release.
