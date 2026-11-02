@@ -2,6 +2,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { version } from "../package.json";
+
 import {
   evaluateExports,
   fixtureEnv,
@@ -38,7 +40,7 @@ describe("published CLI", () => {
 
   it.each([
     ["--help", /Environment and deployment commands/u],
-    ["--version", /affect v0\.0\.1/u],
+    ["--version", `affect v${version}`],
   ])("supports %s without project credentials", async (flag, output) => {
     const f = await fixture();
     const result = runCli(f, [flag]);

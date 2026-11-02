@@ -10,24 +10,22 @@ bunx --no-install affect --help
 Run commands from the application repository root:
 
 - `affect env` prints shell exports from `env/{development,preview,production,ci}/.env`. It requires the matching `DOTENV_PRIVATE_KEY` when that file exists. Treat its output as secrets.
+- `affect run -- <command> [args...]` loads that environment and runs a command. Existing environment values take precedence; arguments, standard I/O, and exit codes are preserved.
 - `affect dotenvx -- …` forwards arguments to the bundled native dotenvx CLI, for example `affect dotenvx -- encrypt -f env/development/.env --no-armor --no-native`.
 - `affect setup` initializes an anonymous local Convex backend only for a fresh project, or retries its environment import. It preserves existing linked deployments and credentials.
-- `affect deploy` uses Convex's native deploy/build sequence, imports the selected backend environment, and builds the frontend. It requires `VERCEL_ENV=preview|production`, a matching deploy key in the encrypted file, and a branch name for previews. `--build` is its internal Convex callback.
+- `affect deploy` uses Convex's native deploy/build sequence, imports the selected backend environment, and builds the frontend. Vercel supplies `VERCEL_ENV=preview|production` and the preview branch name automatically; put the matching deploy key in the encrypted file. `--build` is its internal Convex callback.
 
 Selection uses `VERCEL_ENV`, then `ci` for GitHub Actions/CI, otherwise `development`. Files stay in the application; cryptography stays in dotenvx. Deployment follows Affect's `apps/web` layout.
 
-For Mise, install dependencies once, then use:
+For example, an application's package scripts can load their environment automatically:
 
-```toml
-[env]
-_.source = { path = "node_modules/affect-cli/scripts/activate.sh", tools = true, redact = true }
-_.file = { path = ".env.local", tools = true }
-
-[tasks.setup]
-run = "bun install --frozen-lockfile && bunx --no-install affect setup"
+```json
+{
+  "scripts": {
+    "dev": "affect run -- convex dev --start \"bun run dev:web\""
+  }
+}
 ```
-
-The Bash bridge only exports the CLI's output into the parent shell. It does not change backend state.
 
 ## Development and releases
 

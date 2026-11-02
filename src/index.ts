@@ -7,6 +7,7 @@ import { version } from "../package.json";
 import { deploy } from "./deploy";
 import { dotenvx } from "./dotenv";
 import { exports } from "./environment";
+import { run } from "./run";
 import { setup } from "./setup";
 
 const program = Command.make("affect").pipe(
@@ -15,6 +16,14 @@ const program = Command.make("affect").pipe(
     Command.make("env", {}, () => exports().pipe(Effect.flatMap(Console.log))).pipe(
       Command.withDescription("Print shell exports for the selected encrypted environment."),
     ),
+    Command.make(
+      "run",
+      {
+        command: Argument.String("command"),
+        params: Argument.String("args").pipe(Argument.variadic()),
+      },
+      ({ command, params }) => run(command, params),
+    ).pipe(Command.withDescription("Run a command with the selected encrypted environment.")),
     Command.make(
       "dotenvx",
       { args: Argument.String("args").pipe(Argument.variadic()) },
