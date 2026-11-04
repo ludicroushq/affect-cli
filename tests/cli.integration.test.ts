@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -16,6 +17,9 @@ import {
 import type { Fixture } from "./cli-test-helpers";
 
 const active: Fixture[] = [];
+const dollar = "$";
+const siteTemplate = `${dollar}{VERCEL_URL:+https://}${dollar}{VERCEL_URL:-http://localhost:3000}`;
+const originsTemplate = `${dollar}{SITE_URL}${dollar}{VERCEL_URL:+,https://}${dollar}{VERCEL_URL}${dollar}{VERCEL_BRANCH_URL:+,https://}${dollar}{VERCEL_BRANCH_URL}`;
 
 const fixture = async (options?: Parameters<typeof makeFixture>[0]) => {
   const value = await makeFixture(options);
@@ -93,6 +97,26 @@ describe("published CLI", () => {
       stdout: "resolved",
     });
     await expect(readFixtureFile(f, "counter")).resolves.toBe("invocation\n");
+  });
+
+  it("expands the Vercel URL template to the local fallback without Vercel variables", async () => {
+    const f = await fixture({
+      values: {
+        SITE_URL: siteTemplate,
+        TRUSTED_ORIGINS: originsTemplate,
+      },
+    });
+
+    const result = runCli(f, ["env"], fixtureEnv(f));
+    expect(result.status).toBe(0);
+    expect(evaluateExports(f, result.stdout, "SITE_URL")).toMatchObject({
+      status: 0,
+      stdout: "http://localhost:3000",
+    });
+    expect(evaluateExports(f, result.stdout, "TRUSTED_ORIGINS")).toMatchObject({
+      status: 0,
+      stdout: "http://localhost:3000",
+    });
   });
 
   it("rejects invalid shell variable names without exposing their values", async () => {
@@ -257,76 +281,129 @@ describe("published CLI", () => {
         environment,
         values: {
           CONVEX_DEPLOY_KEY: key,
+          INTERPOLATED_VALUE: `${dollar}{VERCEL_URL}`,
           NEXT_PUBLIC_CONVEX_SITE_URL: "stale-site",
           NEXT_PUBLIC_CONVEX_URL: "stale-cloud",
           SITE_URL: "configured-site",
+          SPECIAL_VALUE: `quote" single' backslash\\n CRLF\r\n trailing\n`,
         },
       });
 
       const result = runCli(f, ["deploy", "--build"], {
         ...fixtureEnv(f),
-        NEXT_PUBLIC_CONVEX_SITE_URL: "injected-site",
-        NEXT_PUBLIC_CONVEX_URL: "injected-cloud",
+        INHERITED_SECRET: "inherited-synthetic-secret",
+        NEXT_PUBLIC_CONVEX_SITE_URL: "https://injected-site.convex.site",
+        NEXT_PUBLIC_CONVEX_URL: "https://injected-cloud.convex.cloud",
         VERCEL_ENV: environment,
         VERCEL_GIT_COMMIT_REF: "feature/fixture",
+        VERCEL_URL: "expanded.example.com",
       });
 
-      expect(result.status).toBe(0);
-      await expect(readConvexInput(f, 0)).resolves.toContain(`CONVEX_DEPLOY_KEY="${key}"`);
-      await expect(readFixtureFile(f, "build.marker")).resolves.toBe(
-        "injected-cloud|injected-site|configured-site",
+      const httpLog = await readFixtureFile(f, "convex-http.log");
+      const body = await readFixtureFile(f, "convex-http.body");
+      const build = await readFixtureFile(f, "build.marker");
+      expect({ build, status: result.status }).toStrictEqual({
+        build:
+          "https://injected-cloud.convex.cloud|https://injected-site.convex.site|configured-site",
+        status: 0,
+      });
+      expect(httpLog).toContain(
+        `https://injected-cloud.convex.cloud/api/v1/update_environment_variables\nConvex ${key}`,
       );
-
-      const command =
-        environment === "preview"
-          ? /^env set --force --preview-name feature\/fixture\n/u
-          : /^env set --force\n/u;
-
-      await expect(readConvexLog(f)).resolves.toMatch(command);
+      expect(JSON.parse(body)).toStrictEqual({
+        changes: [
+          { name: "SITE_URL", value: "configured-site" },
+          { name: "INTERPOLATED_VALUE", value: "expanded.example.com" },
+          {
+            name: "SPECIAL_VALUE",
+            value: `quote" single' backslash\\n CRLF\r\n trailing\n`,
+          },
+        ],
+      });
+      expect(body).not.toMatch(/INHERITED_SECRET|CONVEX_DEPLOY_KEY|NEXT_PUBLIC_CONVEX_URL/u);
     },
   );
+
+  it("runs the Convex build callback with only the encrypted preview key", async () => {
+    const f = await fixture({
+      convexMode: "run-build",
+      environment: "preview",
+      values: {
+        CONVEX_DEPLOY_KEY: "preview:test",
+        NEXT_PUBLIC_CONVEX_SITE_URL: "stale-site",
+        NEXT_PUBLIC_CONVEX_URL: "stale-cloud",
+        NEXT_PUBLIC_POSTHOG_HOST: `${dollar}{POSTHOG_HOST}`,
+        NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN: `${dollar}{POSTHOG_PROJECT_TOKEN}`,
+        POSTHOG_HOST: "https://us.i.posthog.com",
+        POSTHOG_PROJECT_TOKEN: "",
+        SITE_URL: siteTemplate,
+        TRUSTED_ORIGINS: originsTemplate,
+      },
+    });
+
+    const environment = {
+      ...fixtureEnv(f),
+      CI: "true",
+      VERCEL: "1",
+      VERCEL_BRANCH_URL: "feature-fixture.example.com",
+      VERCEL_ENV: "preview",
+      VERCEL_GIT_COMMIT_REF: "feature/fixture",
+    };
+
+    const encrypted = await readFile(f.envFile, "utf-8");
+
+    for (const host of ["preview.example.com", "preview-refresh.example.com"]) {
+      const result = runCli(f, ["deploy"], { ...environment, VERCEL_URL: host });
+
+      const build = readFileSync(path.join(f.root, "build.marker"), "utf-8");
+      const copied = readFileSync(path.join(f.root, "apps/web/.env.production"), "utf-8");
+      const body = readFileSync(f.convexHttpBody, "utf-8");
+
+      expect({ build, copied, status: result.status }).toMatchObject({
+        build: `https://callback.convex.cloud|https://callback.convex.site|https://${host}`,
+        copied: encrypted,
+        status: 0,
+      });
+      expect(body).toContain(`https://${host}`);
+      expect(body).toContain(`https://${host},https://${host},https://feature-fixture.example.com`);
+      expect(body).toContain('"name":"POSTHOG_PROJECT_TOKEN","value":""');
+      expect(body).not.toContain("CONVEX_DEPLOY_KEY");
+    }
+
+    const log = await readConvexLog(f);
+    expect(
+      log.match(/^deploy --preview-name feature\/fixture --cmd .*affect deploy --build/gmu),
+    ).toHaveLength(2);
+    expect(log).not.toContain("--preview-create");
+  });
 
   it("stops before the build if environment synchronization fails", async () => {
     const f = await fixture({
       convexMode: "fail-env-set",
       environment: "production",
-      values: { CONVEX_DEPLOY_KEY: "prod:test" },
+      values: {
+        CONVEX_DEPLOY_KEY: "prod:test",
+        FAIL_VALUE: "payload-secret-sentinel",
+      },
     });
 
     const result = runCli(f, ["deploy", "--build"], {
       ...fixtureEnv(f),
-      NEXT_PUBLIC_CONVEX_SITE_URL: "injected-site",
-      NEXT_PUBLIC_CONVEX_URL: "injected-cloud",
+      NEXT_PUBLIC_CONVEX_SITE_URL: "https://injected-site.convex.site",
+      NEXT_PUBLIC_CONVEX_URL: "https://injected-cloud.convex.cloud",
       VERCEL_ENV: "production",
     });
 
-    expectFailure(result, /exited with status 23/u);
+    expectFailure(result, /Could not synchronize Convex environment variables/u);
+    expect(result.stderr).not.toContain("prod:test");
+    expect(result.stderr).not.toContain("payload-secret-sentinel");
     await expect(readFixtureFile(f, "build.marker")).rejects.toThrow("ENOENT");
-  });
-
-  it("handles decrypted input larger than a pipe buffer", async () => {
-    const large = "x".repeat(70_000);
-
-    const f = await fixture({
-      environment: "production",
-      values: { CONVEX_DEPLOY_KEY: "prod:test", LARGE_VALUE: large },
-    });
-
-    const result = runCli(f, ["deploy", "--build"], {
-      ...fixtureEnv(f),
-      NEXT_PUBLIC_CONVEX_SITE_URL: "site",
-      NEXT_PUBLIC_CONVEX_URL: "cloud",
-      VERCEL_ENV: "production",
-    });
-
-    expect(result.status).toBe(0);
-    await expect(readConvexInput(f, 0)).resolves.toContain(`LARGE_VALUE="${large}"`);
   });
 
   it("propagates a build failure", async () => {
     const f = await fixture({
       environment: "production",
-      values: { CONVEX_DEPLOY_KEY: "prod:test" },
+      values: { BUILD_VALUE: "synthetic", CONVEX_DEPLOY_KEY: "prod:test" },
     });
 
     await writeFile(
@@ -336,13 +413,13 @@ describe("published CLI", () => {
 
     const result = runCli(f, ["deploy", "--build"], {
       ...fixtureEnv(f),
-      NEXT_PUBLIC_CONVEX_SITE_URL: "site",
-      NEXT_PUBLIC_CONVEX_URL: "cloud",
+      NEXT_PUBLIC_CONVEX_SITE_URL: "https://site.convex.site",
+      NEXT_PUBLIC_CONVEX_URL: "https://cloud.convex.cloud",
       VERCEL_ENV: "production",
     });
 
     expectFailure(result, /bun exited with status 31/u);
-    await expect(readConvexLog(f)).resolves.toMatch(/^env set --force\n/u);
+    await expect(readFixtureFile(f, "convex-http.body")).resolves.toContain('"changes"');
   });
 
   it("propagates a deployment failure", async () => {

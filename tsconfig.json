@@ -35,6 +35,8 @@
         "allowedUnstableApis": [
           "effect/process",
           "effect/cli",
+          // Effect's documented HTTP client is unstable; remove this entry when it becomes stable.
+          "effect/http",
           "effect/FileSystem",
           "effect/Path",
           "@effect/platform-bun"

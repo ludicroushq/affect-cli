@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -18,6 +18,8 @@ export interface Fixture {
   privateKey: string | undefined;
   convexLog: string;
   convexInputDir: string;
+  convexHttpLog: string;
+  convexHttpBody: string;
   convexCount: string;
   convexMode: string;
   cleanup: () => Promise<void>;
@@ -66,14 +68,36 @@ export const makeFixture = async ({
 }: FixtureOptions = {}): Promise<Fixture> => {
   const root = await mkdtemp(path.join(tmpdir(), "affect-cli-"));
   const convexBin = path.join(root, "node_modules", ".bin", "convex");
+  const affectBin = path.join(root, "node_modules", ".bin", "affect");
   const convexInputDir = path.join(root, "convex-input");
+  const convexHttpLog = path.join(root, "convex-http.log");
+  const convexHttpBody = path.join(root, "convex-http.body");
+  const convexPreload = path.join(root, "convex-http-preload.mjs");
   const convexLog = path.join(root, "convex.log");
   const convexCount = path.join(root, "convex.count");
   await mkdir(path.dirname(convexBin), { recursive: true });
+  await symlink(cliEntry, affectBin);
   await mkdir(convexInputDir, { recursive: true });
   await mkdir(path.join(root, "apps", "web"), { recursive: true });
   await mkdir(path.join(root, ".home"), { recursive: true });
   await mkdir(path.join(root, ".tmp"), { recursive: true });
+  await writeFile(
+    convexPreload,
+    `const log = process.env.AFFECT_FAKE_CONVEX_HTTP_LOG;
+const bodyFile = process.env.AFFECT_FAKE_CONVEX_HTTP_BODY;
+if (log && bodyFile) {
+  globalThis.fetch = async (input, init) => {
+    const request = new Request(input, init);
+    const body = await request.text();
+    await Bun.write(bodyFile, body);
+    await Bun.write(log, request.url + "\\n" + (request.headers.get("authorization") ?? "") + "\\n");
+    return new Response(null, {
+      status: process.env.AFFECT_FAKE_CONVEX_MODE === "fail-env-set" ? 503 : 200,
+    });
+  };
+}
+`,
+  );
 
   await writeFile(
     convexBin,
@@ -101,6 +125,21 @@ case "\${1-}" in
     ;;
   deploy)
     if [ "\${AFFECT_FAKE_CONVEX_MODE-}" = fail-deploy ]; then exit 24; fi
+    if [ "\${AFFECT_FAKE_CONVEX_MODE-}" = run-build ]; then
+      command=""
+      previous=""
+      for argument in "$@"; do
+        if [ "$previous" = --cmd ]; then
+          command="$argument"
+          break
+        fi
+        previous="$argument"
+      done
+      BUN_OPTIONS="--preload=$AFFECT_FAKE_CONVEX_PRELOAD" \
+      NEXT_PUBLIC_CONVEX_URL="https://callback.convex.cloud" \
+      NEXT_PUBLIC_CONVEX_SITE_URL="https://callback.convex.site" \
+      sh -c "$command"
+    fi
     ;;
 esac
 `,
@@ -154,6 +193,8 @@ esac
       await rm(root, { force: true, recursive: true });
     },
     convexCount,
+    convexHttpBody,
+    convexHttpLog,
     convexInputDir,
     convexLog,
     convexMode,
@@ -186,9 +227,12 @@ export const runCli = (
 ): CliResult => {
   const env: NodeJS.ProcessEnv = cleanEnv(fixture.root, {
     AFFECT_FAKE_CONVEX_COUNT: fixture.convexCount,
+    AFFECT_FAKE_CONVEX_HTTP_BODY: fixture.convexHttpBody,
+    AFFECT_FAKE_CONVEX_HTTP_LOG: fixture.convexHttpLog,
     AFFECT_FAKE_CONVEX_INPUT_DIR: fixture.convexInputDir,
     AFFECT_FAKE_CONVEX_LOG: fixture.convexLog,
     AFFECT_FAKE_CONVEX_MODE: fixture.convexMode,
+    AFFECT_FAKE_CONVEX_PRELOAD: path.join(fixture.root, "convex-http-preload.mjs"),
   });
 
   for (const [key, value] of Object.entries(extraEnv)) {
@@ -197,11 +241,15 @@ export const runCli = (
     }
   }
 
-  const result = spawnSync("bun", [cliEntry, ...args], {
-    cwd: fixture.root,
-    encoding: "utf-8",
-    env,
-  });
+  const result = spawnSync(
+    "bun",
+    ["--preload", path.join(fixture.root, "convex-http-preload.mjs"), cliEntry, ...args],
+    {
+      cwd: fixture.root,
+      encoding: "utf-8",
+      env,
+    },
+  );
 
   return { status: result.status, stderr: result.stderr ?? "", stdout: result.stdout ?? "" };
 };
