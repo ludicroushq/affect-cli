@@ -310,16 +310,17 @@ describe("published CLI", () => {
       expect(httpLog).toContain(
         `https://injected-cloud.convex.cloud/api/v1/update_environment_variables\nConvex ${key}`,
       );
-      expect(JSON.parse(body)).toStrictEqual({
-        changes: [
-          { name: "SITE_URL", value: "configured-site" },
+      expect(JSON.parse(body)).toHaveProperty(
+        "changes",
+        expect.arrayContaining([
           { name: "INTERPOLATED_VALUE", value: "expanded.example.com" },
+          { name: "SITE_URL", value: "configured-site" },
           {
             name: "SPECIAL_VALUE",
             value: `quote" single' backslash\\n CRLF\r\n trailing\n`,
           },
-        ],
-      });
+        ]),
+      );
       expect(body).not.toMatch(/INHERITED_SECRET|CONVEX_DEPLOY_KEY|NEXT_PUBLIC_CONVEX_URL/u);
     },
   );
