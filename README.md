@@ -10,12 +10,27 @@ bunx --no-install affect --help
 Run commands from the application repository root:
 
 - `affect env` prints shell exports from `env/{development,preview,production,ci}/.env`. It requires the matching `DOTENV_PRIVATE_KEY` when that file exists. Treat its output as secrets.
+- `affect env sync-dev [--force]` reads only `env/development/.env` with its matching `DOTENV_PRIVATE_KEY` and synchronizes declared server settings to its verified hosted development backend. It never deploys code or builds the frontend. It ignores inherited CI, production, account-token and provider-host selection. Missing required settings fail; absent optional settings preserve remote values; explicit empty strings remain values. Existing differing values refuse the entire batch unless `--force` is supplied. Omission never deletes a remote setting. Output contains only the verified target and setting counts.
 - `affect run -- <command> [args...]` loads that environment and runs a command. Existing environment values take precedence; arguments, standard I/O, and exit codes are preserved.
 - `affect dotenvx -- …` forwards arguments to the bundled native dotenvx CLI, for example `affect dotenvx -- encrypt -f env/development/.env --no-armor --no-native`.
 - `affect setup` initializes an anonymous local Convex backend only for a fresh project, or retries its environment import. It preserves existing linked deployments and credentials.
 - `affect deploy` uses Convex's native deploy/build sequence, imports the selected backend environment, and builds the frontend. Vercel supplies `VERCEL_ENV=preview|production` and the preview branch name automatically; put the matching deploy key in the encrypted file. `--build` is its internal Convex callback.
 
-Selection uses `VERCEL_ENV`, then `ci` for GitHub Actions/CI, otherwise `development`. Files stay in the application; cryptography stays in dotenvx. Deployment follows Affect's `apps/web` layout.
+Except for the explicitly development-only `env sync-dev`, selection uses `VERCEL_ENV`, then `ci` for GitHub Actions/CI, otherwise `development`. Files stay in the application; cryptography stays in dotenvx. Deployment follows Affect's `apps/web` layout.
+
+`env sync-dev` requires a declaration-only `convex/env.config.ts` with a default Convex `EnvDefinition` export. Share that same object with `defineApp({ env })`; keep it independent of generated files, app/component initialization and runtime environment reads. The Bun-only CLI loads this trusted module directly. It does not execute `convex.config.ts` or generate an allowlist from source text. For example:
+
+```ts
+import type { EnvDefinition } from "convex/server";
+import { v } from "convex/values";
+
+export default {
+  API_TOKEN: v.string(),
+  OPTIONAL_SETTING: v.optional(v.string()),
+} satisfies EnvDefinition;
+```
+
+Use the profile's development-scoped deploy key and canonical public Convex cloud/site origins. Before any update the command verifies the provider's cloud/development identity, owning team/project and both canonical URLs. Reserved credential/control/client-public names are rejected even if declared. Only present declared server settings are sent, using the native Convex JSON environment API without temporary plaintext files; native Convex remains responsible for provider limits and application value validation. The command needs metadata and environment read/write permissions; it does not create credentials or fall back to a broader login. Profile values use the same dotenvx decryption and interpolation as `affect env`.
 
 For example, an application's package scripts can load their environment automatically:
 

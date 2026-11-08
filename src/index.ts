@@ -9,12 +9,24 @@ import { dotenvx } from "./dotenv";
 import { exports } from "./environment";
 import { run } from "./run";
 import { setup } from "./setup";
+import { syncDev } from "./sync-dev";
 
 const program = Command.make("affect").pipe(
   Command.withDescription("Environment and deployment commands for Affect applications."),
   Command.withSubcommands([
     Command.make("env", {}, () => exports().pipe(Effect.flatMap(Console.log))).pipe(
       Command.withDescription("Print shell exports for the selected encrypted environment."),
+      Command.withSubcommands([
+        Command.make(
+          "sync-dev",
+          { force: Flag.Boolean("force").pipe(Flag.withDefault(false)) },
+          ({ force }) => syncDev(force),
+        ).pipe(
+          Command.withDescription(
+            "Sync declared server settings to the verified hosted development backend; --force overwrites conflicts. No deployment.",
+          ),
+        ),
+      ]),
     ),
     Command.make(
       "run",

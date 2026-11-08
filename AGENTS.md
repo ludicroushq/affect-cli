@@ -11,3 +11,5 @@
   diagnostics to make a check pass.
 - Treat package edits, versioning, publishing, and other release transitions as
   separate actions. Do not publish, push, or deploy without explicit approval.
+- Default all CLI changesets and releases to patch versions. Minor or major
+  versions require explicit human instruction.
