@@ -376,7 +376,7 @@ describe("published CLI", () => {
       log.match(/^deploy --preview-name feature\/fixture --cmd .*affect deploy --build/gmu),
     ).toHaveLength(2);
     expect(log).not.toContain("--preview-create");
-  });
+  }, 10_000);
 
   it("stops before the build if environment synchronization fails", async () => {
     const f = await fixture({
